@@ -22,6 +22,13 @@ impl<const N: usize, const M: usize> Matrix<N,M> {
             values: [[0.0;M];N],
         }
     }
+    pub fn eye() -> Matrix<N,N> {
+        let mut out = Matrix::empty();
+        for i in 0..N {
+            out[i][i] = 1.0;
+        }
+        return out;
+    }
     
     pub fn dot<const K: usize>(&self, other: &Matrix<M,K>) -> Matrix<N,K> {
         let mut out: Matrix<N,K> = Matrix::empty();
@@ -53,6 +60,19 @@ impl<const N: usize, const M: usize> Matrix<N,M> {
             for j in 0..K {
                 for k in 0..N {
                     out[i][j] += self[k][i]*other[k][j];
+                }
+            }
+        }        
+        
+        return out;
+    }
+
+    pub fn t_dot_t<const K: usize>(&self, other: &Matrix<K,N>) -> Matrix<M,K> {
+        let mut out: Matrix<M,K> = Matrix::empty();
+        for i in 0..N {
+            for j in 0..K {
+                for k in 0..M {
+                    out[i][j] += self[k][i]*other[j][k];
                 }
             }
         }        
@@ -112,6 +132,162 @@ impl<const N: usize, const M: usize> Matrix<N,M> {
         }
 
         return (q, r);
+    }
+
+    pub fn svd(&self) -> (Matrix<N,M>, Matrix<M,M>, Matrix<M,M>) {
+        //
+        // PHASE 1: Golub-Kahan Bi-Diagonalization
+        // https://netlib.org/utk/people/JackDongarra/etemplates/node198.html
+        //
+        let (q, mut b) = self.qr();
+        // init u as empty
+        let mut u: Matrix<M,M>= Matrix::empty();
+        // init v_0 as unit norm
+        let mut v: Matrix<M,M> = Matrix::empty();
+        v[0][0] = 1.0;
+
+        let mut alpha: f64 = 0.0;
+        let mut beta: f64 = 0.0;
+        // initial step for k=0!
+        for row in 0..M {
+            for inner in 0..M {
+                u[row][0] += b[row][inner]*v[inner][0];
+            }
+            alpha += u[row][0]*u[row][0];
+        }
+        alpha = f64::sqrt(alpha);
+        for row in 0..M {
+            u[row][0] /= alpha;
+        }
+        
+        v[0][1] -= alpha; // since v_0 = [1 0 0 0 ...] we can do this
+        for row in 0..M {
+            for inner in 0..M {
+                v[row][1] += b[inner][row]*u[inner][0];
+            }
+            beta += v[row][1]*v[row][1];
+        }
+        beta = f64::sqrt(beta);
+        for row in 0..M {
+            v[row][1] /= beta;
+        }
+
+
+
+        for k in 1..(M-1) {
+            alpha = 0.0;
+            // u_k  = A . v_k - \beta * u_{k-1}
+            for row in 0..M {
+                for inner in 0..M {
+                    u[row][k] += b[row][inner]*v[inner][k];
+                }
+                u[row][k] -= beta * u[row][k-1];
+                alpha += u[row][k]*u[row][k]
+            }
+            alpha = f64::sqrt(alpha);
+            // u_k  = u_k / \alpha
+            for row in 0..M {
+                u[row][k] /= alpha;
+            }
+
+            beta = 0.0;
+            // v_{k+1} = A.T . u_k - \alpha * v_k
+            for row in 0..M {
+                for inner in 0..M {
+                    v[row][k+1] += b[inner][row]*u[inner][k];
+                }
+                v[row][k+1] -= alpha * v[row][k];
+                beta += v[row][k+1]*v[row][k+1]
+            }
+            beta = f64::sqrt(beta);
+            // v_k  = v_k / \beta
+            for row in 0..M {
+                v[row][k+1] /= beta;
+            }
+        }
+
+        // last step for u_k
+        alpha = 0.0;
+        // u_k  = A . v_k - \beta * u_{k-1}
+        for row in 0..M {
+            for inner in 0..M {
+                u[row][M-1] += b[row][inner]*v[inner][M-1];
+            }
+            u[row][M-1] -= beta * u[row][M-2];
+            alpha += u[row][M-1]*u[row][M-1]
+        }
+        alpha = f64::sqrt(alpha);
+        // u_k  = u_k / \alpha
+        for row in 0..M {
+            u[row][M-1] /= alpha;
+        }
+
+        b = u.t_dot(&b).dot(&v);
+        let mut u = q.dot(&u);
+
+        // cleanup B
+        for i in 0..M {
+            for j in 0..M {
+                if j != i && j != i+1 {
+                    b[i][j] = 0.0;
+                }
+            }
+        }
+
+        //
+        // PHASE 2: Demmel-Kahan Bidiagonal SVD
+        // http://www.math.pitt.edu/~sussmanm/2071Spring08/lab09/index.html
+        //
+        fn givens(f: f64, g: f64) -> (f64,f64,f64) {
+            if f64::abs(f) <= 1e-10 {
+                return (0.0,1.0,g);
+            } 
+            
+            if f64::abs(f) > f64::abs(g) {
+                let t = g/f;
+                let t1 = f64::sqrt(1.0 + t*t);
+                return (1.0/t1, t/t1, f*t1)
+            } else {
+                let t = f/g;
+                let t1 = f64::sqrt(1.0 + t*t);
+                return (t/t1, 1.0/t1, g*t1)
+            }
+         }
+
+        let n_iter: usize = 100;
+        for _ in 0..n_iter {
+            for i in 0..M-1 {
+                let mut csr = Matrix::<M,M>::eye();
+                let (c,s,_r) = givens(b[i][i], b[i][i+1]);
+                csr[i][i] = c;
+                csr[i][i+1] = s;
+                csr[i+1][i] = -s;
+                csr[i+1][i+1] = c;
+
+                b = b.dot_t(&csr);
+                v = v.dot_t(&csr);
+
+                let mut csr = Matrix::<M,M>::eye();
+                let (c,s,_r) = givens(b[i][i], b[i+1][i]);
+                csr[i][i] = c;
+                csr[i][i+1] = s;
+                csr[i+1][i] = -s;
+                csr[i+1][i+1] = c;
+                
+                b = csr.dot(&b);
+                u = u.dot_t(&csr);
+
+            }
+        }
+        // cleanup b
+        for i in 0..M {
+            for j in 0..M {
+                if j != i {
+                    b[i][j] = 0.0;
+                }
+            }
+        }
+        (u, b, v)
     }
 }
 
@@ -305,6 +481,48 @@ mod tests {
 
         assert!(f64::abs(beta[0][0] - 2.01075233) < 1e-5);
         assert!(f64::abs(beta[1][0] - 3.04392419) < 1e-5);
+        
+    }
+
+    #[test]
+    fn test_svd() {
+        let tol = 1e-10;
+
+        let mat = Matrix::new([[1.0,2.0,3.0,4.0],[0.0,10.0,11.0,12.0],[0.0,0.0,25.0,26.0],[0.0,0.0,0.0,90.0]]);
+        let (u,s,v) = mat.svd();
+        
+
+        // check for orthogonality in U
+        let id = u.t_dot(&u);
+        for row in 0..id.rows {
+            for col in 0..id.cols {
+                if row == col {
+                    assert!(f64::abs(id[row][col]-1.0) < tol);
+                } else {
+                    assert!(f64::abs(id[row][col]) < tol);
+                }
+            }
+        }
+
+        // check for orthogonality in V
+        let id = v.t_dot(&v);
+        for row in 0..id.rows {
+            for col in 0..id.cols {
+                if row == col {
+                    assert!(f64::abs(id[row][col]-1.0) < tol);
+                } else {
+                    assert!(f64::abs(id[row][col]) < tol);
+                }
+            }
+        }
+        
+        // check for equality in U.S.Vt == mat
+        let id = dbg!(u.dot(&s).dot_t(&v));
+        for row in 0..id.rows {
+            for col in 0..id.cols {
+                assert!(f64::abs(id[row][col] - mat[row][col]) < tol);
+            }
+        }
         
     }
 }
