@@ -1,29 +1,35 @@
 use super::Model;
 use crate::matrix::Matrix;
 
-
-
-
 /// Model which (for response `y`, features `X`, and model parameters `b`) minimizes the objective
 /// function (with respect to `b`): `(y - X . b)^T (y - X . b) + lambda * (alpha * |b| + (1-alpha) * b^T . b)`
-/// 
+///
 /// This is the Elastic Net. Note that for: lambda = 0 this reduces to OLS, for alpha = 1 this reduces to Lasso
 /// regression, and for alpha = 0, this reduces to Ridge regression.
 pub struct LinearModel<const K_VARS: usize> {
-    pub c: [f64 ; K_VARS],
+    pub c: [f64; K_VARS],
+    // regularization coefficients
     l1_coeff: f64,
     l2_coeff: f64,
 }
 
-impl<const K: usize> LinearModel<K> {}
+pub struct Options {
+    lambda: f64,  // overall strength parameter
+    alpha: f64,   // linear weighting between L1 and L2 norm regularizations
+    fit_tol: f64, // threshold for R^2 convergence used in coordinate descent for fitting the LASSO and Elastic Net
+}
 
 impl<const K_VARS: usize> Model<K_VARS> for LinearModel<K_VARS> {
     type FittingOptions = Options;
 
-    fn fit<const N: usize>(x: crate::matrix::Matrix<N, K_VARS>, y: crate::matrix::Matrix<N,1>, options: Self::FittingOptions) -> Self {
+    fn fit<const N: usize>(
+        x: crate::matrix::Matrix<N, K_VARS>,
+        y: crate::matrix::Matrix<N, 1>,
+        options: Self::FittingOptions,
+    ) -> Self {
         if options.lambda == 0.0 {
             // OLS via QR decomposition
-            let (q,r) = x.qr();
+            let (q, r) = x.qr();
             let coeff = y.t_dot(&q).dot_t(&Matrix::back_sub_inv(&r));
 
             return LinearModel {
@@ -31,11 +37,10 @@ impl<const K_VARS: usize> Model<K_VARS> for LinearModel<K_VARS> {
                 l1_coeff: 0.0,
                 l2_coeff: 0.0,
             };
-
         } else if options.alpha == 1.0 {
             // LASSO Regression via Coordinate Descent
             let mut out = LinearModel {
-                c: [0.0 ; K_VARS],
+                c: [0.0; K_VARS],
                 l1_coeff: options.lambda,
                 l2_coeff: 0.0,
             };
@@ -48,7 +53,7 @@ impl<const K_VARS: usize> Model<K_VARS> for LinearModel<K_VARS> {
 
             let mut tss = 0.0;
             for i in 0..N {
-                tss += (y[i][0] - y_mean)*(y[i][0] - y_mean);
+                tss += (y[i][0] - y_mean) * (y[i][0] - y_mean);
             }
             // setup of other state variables & constants
             let mut old_rsq = 0.0;
@@ -67,7 +72,7 @@ impl<const K_VARS: usize> Model<K_VARS> for LinearModel<K_VARS> {
                     for j in 0..N {
                         new_coeff += x[j][i] * y[j][0];
                         for k in 0..K_VARS {
-                            new_coeff -= x[j][i]*x[j][k]*out.c[k];
+                            new_coeff -= x[j][i] * x[j][k] * out.c[k];
                         }
                     }
 
@@ -84,15 +89,14 @@ impl<const K_VARS: usize> Model<K_VARS> for LinearModel<K_VARS> {
                 for i in 0..N {
                     let mut mid = 0.0;
                     for k in 0..K_VARS {
-                        mid += x[i][k]*out.c[k];
+                        mid += x[i][k] * out.c[k];
                     }
-                    new_rsq += (y[i][0] - mid)*(y[i][0] - mid);
+                    new_rsq += (y[i][0] - mid) * (y[i][0] - mid);
                 }
-                new_rsq = 1.0 - new_rsq/tss;
+                new_rsq = 1.0 - new_rsq / tss;
             }
 
             return out;
-
         } else if options.alpha == 0.0 {
             // Ridge Regression via QR decomposition
             let mut decomp = x.t_dot(&x);
@@ -100,7 +104,7 @@ impl<const K_VARS: usize> Model<K_VARS> for LinearModel<K_VARS> {
                 decomp[i][i] += options.lambda;
             }
 
-            let (q,r) = decomp.qr();
+            let (q, r) = decomp.qr();
             let c = y.t_dot(&x).dot(&q).dot_t(&Matrix::back_sub_inv(&r))[0];
 
             return LinearModel {
@@ -108,11 +112,10 @@ impl<const K_VARS: usize> Model<K_VARS> for LinearModel<K_VARS> {
                 l1_coeff: 0.0,
                 l2_coeff: options.lambda,
             };
-
         } else {
             // Generalized Elastic Net via Coordinate Descent
             let mut out = LinearModel {
-                c: [0.0 ; K_VARS],
+                c: [0.0; K_VARS],
                 l1_coeff: options.lambda * options.alpha,
                 l2_coeff: options.lambda * (1.0 - options.alpha),
             };
@@ -125,7 +128,7 @@ impl<const K_VARS: usize> Model<K_VARS> for LinearModel<K_VARS> {
             }
             let mut tss = 0.0;
             for i in 0..N {
-                tss += (y[i][0] - y_mean)*(y[i][0] - y_mean);
+                tss += (y[i][0] - y_mean) * (y[i][0] - y_mean);
             }
             // setup of other state variables & constants
             let mut old_rsq = 0.0;
@@ -144,7 +147,7 @@ impl<const K_VARS: usize> Model<K_VARS> for LinearModel<K_VARS> {
                     for j in 0..N {
                         new_coeff += x[j][i] * y[j][0];
                         for k in 0..K_VARS {
-                            new_coeff -= x[j][i]*x[j][k]*out.c[k];
+                            new_coeff -= x[j][i] * x[j][k] * out.c[k];
                         }
                     }
 
@@ -156,7 +159,7 @@ impl<const K_VARS: usize> Model<K_VARS> for LinearModel<K_VARS> {
                     out.c[i] = f64::signum(out.c[i]) * f64::max(0.0, f64::abs(out.c[i]) - thresh);
 
                     // shrinkage
-                    out.c[i] /= 1.0 + options.lambda*(1.0 - options.alpha);
+                    out.c[i] /= 1.0 + options.lambda * (1.0 - options.alpha);
                 }
 
                 // compute rsq to check for convergence
@@ -164,31 +167,21 @@ impl<const K_VARS: usize> Model<K_VARS> for LinearModel<K_VARS> {
                 for i in 0..N {
                     let mut mid = 0.0;
                     for k in 0..K_VARS {
-                        mid += x[i][k]*out.c[k];
+                        mid += x[i][k] * out.c[k];
                     }
-                    new_rsq += (y[i][0] - mid)*(y[i][0] - mid);
+                    new_rsq += (y[i][0] - mid) * (y[i][0] - mid);
                 }
-                new_rsq = 1.0 - new_rsq/tss;
+                new_rsq = 1.0 - new_rsq / tss;
             }
 
             return out;
         }
     }
 
-    fn predict<const N: usize>(&self, x: &Matrix<N, K_VARS>) -> Matrix<N,1> {
+    fn predict<const N: usize>(&self, x: &Matrix<N, K_VARS>) -> Matrix<N, 1> {
         x.dot_t(&Matrix::new([self.c]))
     }
 }
-
-
-pub struct Options {
-    lambda: f64,
-    alpha: f64,
-    fit_tol: f64, // threshold for R^2 convergence used in coordinate descent for fitting the LASSO and Elastic Net
-}
-
-
-
 
 #[cfg(test)]
 mod tests {
@@ -196,14 +189,14 @@ mod tests {
     use crate::model::Model;
 
     use super::{LinearModel, Options};
-    
+
     const SEED: u64 = 69;
     const TOL: f64 = 0.1;
 
     #[test]
     pub fn test_ols() {
-        let x: Matrix<10000, 4>=Matrix::rand_seeded(SEED);
-        let true_coeff = Matrix::new([[1.0],[2.0],[3.0],[4.0]]);
+        let x: Matrix<10000, 4> = Matrix::rand_seeded(SEED);
+        let true_coeff = Matrix::new([[1.0], [2.0], [3.0], [4.0]]);
         let y = x.dot(&true_coeff);
 
         let options = Options {
@@ -216,13 +209,12 @@ mod tests {
         for i in 0..4 {
             assert!(f64::abs(model.c[i] - true_coeff[i][0]) < TOL);
         }
-
     }
-    
+
     #[test]
     pub fn test_ridge() {
-        let x: Matrix<10000, 4>=Matrix::rand_seeded(SEED);
-        let true_coeff = Matrix::new([[1.0],[2.0],[3.0],[4.0]]);
+        let x: Matrix<10000, 4> = Matrix::rand_seeded(SEED);
+        let true_coeff = Matrix::new([[1.0], [2.0], [3.0], [4.0]]);
         let y = x.dot(&true_coeff);
 
         let options = Options {
@@ -238,8 +230,8 @@ mod tests {
     }
     #[test]
     pub fn test_lasso() {
-        let x: Matrix<10000, 4>=Matrix::rand_seeded(SEED);
-        let true_coeff = Matrix::new([[1.0],[2.0],[3.0],[4.0]]);
+        let x: Matrix<10000, 4> = Matrix::rand_seeded(SEED);
+        let true_coeff = Matrix::new([[1.0], [2.0], [3.0], [4.0]]);
         let y = x.dot(&true_coeff);
 
         let options = Options {
@@ -255,8 +247,8 @@ mod tests {
     }
     #[test]
     pub fn test_elastic() {
-        let x: Matrix<10000, 4>=Matrix::rand_seeded(SEED);
-        let true_coeff = Matrix::new([[1.0],[2.0],[3.0],[4.0]]);
+        let x: Matrix<10000, 4> = Matrix::rand_seeded(SEED);
+        let true_coeff = Matrix::new([[1.0], [2.0], [3.0], [4.0]]);
         let y = x.dot(&true_coeff);
 
         let options = Options {

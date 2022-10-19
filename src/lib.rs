@@ -1,5 +1,5 @@
-mod model;
 pub mod matrix;
+mod model;
 
 #[cfg(test)]
 mod tests {
