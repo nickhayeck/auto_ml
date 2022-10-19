@@ -1,4 +1,6 @@
-#[derive(Debug,Clone)]
+use rand::{SeedableRng, Rng};
+
+#[derive(Debug,Clone,Copy)]
 pub struct Matrix<const N: usize, const M: usize> {
     pub rows: usize,
     pub cols: usize,
@@ -26,6 +28,26 @@ impl<const N: usize, const M: usize> Matrix<N,M> {
         let mut out = Matrix::empty();
         for i in 0..N {
             out[i][i] = 1.0;
+        }
+        return out;
+    }
+    pub fn rand() -> Matrix<N,M> {
+        let mut out = Matrix::empty();
+        for i in 0..N {
+            for j in 0..M {
+                out[i][j] = rand::random();
+            }
+        }
+        return out;
+    }
+    pub fn rand_seeded(seed: u64) -> Matrix<N,M> {
+        let mut random_gen = rand::rngs::StdRng::seed_from_u64(seed);
+
+        let mut out = Matrix::empty();
+        for i in 0..N {
+            for j in 0..M {
+                out[i][j] = random_gen.gen();
+            }
         }
         return out;
     }
@@ -72,7 +94,7 @@ impl<const N: usize, const M: usize> Matrix<N,M> {
         for i in 0..N {
             for j in 0..K {
                 for k in 0..M {
-                    out[i][j] += self[k][i]*other[j][k];
+                    out[k][j] += self[i][k]*other[j][i];
                 }
             }
         }        
@@ -106,7 +128,7 @@ impl<const N: usize, const M: usize> Matrix<N,M> {
     /// `A = QR`, where `Q` is orthogonal and `R` is upper triangular. This algo
     /// has computational complexity `N M^2 + N M + M`
     pub fn qr(&self) -> (Matrix<N,M>, Matrix<M,M>) {
-        let mut q: Matrix<N,M> = self.clone();
+        let mut q: Matrix<N,M> = *self;
         let mut r: Matrix<M,M> = Matrix::empty();
 
         for k in 0..M {
@@ -347,6 +369,9 @@ impl<const N: usize, const M: usize> PartialEq for Matrix<N,M> {
     }
 }
 impl<const N: usize, const M: usize> Eq for Matrix<N,M> {}
+
+
+
 
 #[cfg(test)]
 mod tests {
